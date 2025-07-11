@@ -3,6 +3,9 @@ mod poll;
 mod types;
 mod utils;
 
+#[cfg(test)]
+mod tests;
+
 pub(crate) use embedded_io::{Read as SyncRead, Write as SyncWrite};
 pub(crate) use embedded_io_async::{Read as AsyncRead, Write as AsyncWrite};
 
