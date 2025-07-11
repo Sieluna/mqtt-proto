@@ -1,7 +1,11 @@
+#![feature(test)]
+
+extern crate test;
+
 use std::convert::TryFrom;
 use std::sync::Arc;
+use test::Bencher;
 
-use criterion::{criterion_group, criterion_main, Criterion};
 use mqtt_proto::{
     v3::{Connect as ConnectV3, LastWill as LastWillV3, Packet as PacketV3},
     v5::{Connect as ConnectV5, LastWill as LastWillV5, Packet as PacketV5},
@@ -37,31 +41,33 @@ fn create_v5_connect_packet() -> PacketV5 {
     PacketV5::Connect(connect)
 }
 
-fn bench_encode(c: &mut Criterion) {
-    let mut group = c.benchmark_group("Encode");
+#[bench]
+fn v3_connect_encode(b: &mut Bencher) {
+    let packet = create_v3_connect_packet();
+    b.iter(|| packet.encode());
+}
 
-    let v3_connect = create_v3_connect_packet();
-    group.bench_function("v3_connect_encode", |b| {
-        b.iter(|| v3_connect.encode())
-    });
+#[bench]
+fn v5_connect_encode(b: &mut Bencher) {
+    let packet = create_v5_connect_packet();
+    b.iter(|| packet.encode());
+}
 
-    let v5_connect = create_v5_connect_packet();
-    group.bench_function("v5_connect_encode", |b| {
-        b.iter(|| v5_connect.encode())
-    });
-
-    let v3_publish = PacketV3::Publish(mqtt_proto::v3::Publish {
+#[bench]
+fn v3_publish_encode(b: &mut Bencher) {
+    let packet = PacketV3::Publish(mqtt_proto::v3::Publish {
         dup: false,
         retain: false,
         qos_pid: QosPid::Level1(Pid::try_from(10).unwrap()),
         topic_name: TopicName::try_from("test/topic".to_string()).unwrap(),
         payload: "hello world".into(),
     });
-    group.bench_function("v3_publish_encode", |b| {
-        b.iter(|| v3_publish.encode())
-    });
+    b.iter(|| packet.encode());
+}
 
-    let v5_publish = PacketV5::Publish(mqtt_proto::v5::Publish {
+#[bench]
+fn v5_publish_encode(b: &mut Bencher) {
+    let packet = PacketV5::Publish(mqtt_proto::v5::Publish {
         dup: false,
         retain: false,
         qos_pid: QosPid::Level2(Pid::try_from(20).unwrap()),
@@ -69,41 +75,39 @@ fn bench_encode(c: &mut Criterion) {
         payload: "hello world v5".into(),
         properties: Default::default(),
     });
-    group.bench_function("v5_publish_encode", |b| {
-        b.iter(|| v5_publish.encode())
-    });
-
-    group.finish();
+    b.iter(|| packet.encode());
 }
 
-fn bench_decode(c: &mut Criterion) {
-    let mut group = c.benchmark_group("Decode");
+#[bench]
+fn v3_connect_decode(b: &mut Bencher) {
+    let packet = create_v3_connect_packet();
+    let bytes = packet.encode().unwrap();
+    b.iter(|| PacketV3::decode(bytes.as_ref()));
+}
 
-    let v3_connect_packet = create_v3_connect_packet();
-    let v3_connect_bytes = v3_connect_packet.encode().unwrap();
-    group.bench_function("v3_connect_decode", |b| {
-        b.iter(|| PacketV3::decode(v3_connect_bytes.as_ref()))
-    });
+#[bench]
+fn v5_connect_decode(b: &mut Bencher) {
+    let packet = create_v5_connect_packet();
+    let bytes = packet.encode().unwrap();
+    b.iter(|| PacketV5::decode(bytes.as_ref()));
+}
 
-    let v5_connect_packet = create_v5_connect_packet();
-    let v5_connect_bytes = v5_connect_packet.encode().unwrap();
-    group.bench_function("v5_connect_decode", |b| {
-        b.iter(|| PacketV5::decode(v5_connect_bytes.as_ref()))
-    });
-
-    let v3_publish = PacketV3::Publish(mqtt_proto::v3::Publish {
+#[bench]
+fn v3_publish_decode(b: &mut Bencher) {
+    let packet = PacketV3::Publish(mqtt_proto::v3::Publish {
         dup: false,
         retain: false,
         qos_pid: QosPid::Level1(Pid::try_from(10).unwrap()),
         topic_name: TopicName::try_from("test/topic".to_string()).unwrap(),
         payload: "hello world".into(),
     });
-    let v3_publish_bytes = v3_publish.encode().unwrap();
-    group.bench_function("v3_publish_decode", |b| {
-        b.iter(|| PacketV3::decode(v3_publish_bytes.as_ref()))
-    });
+    let bytes = packet.encode().unwrap();
+    b.iter(|| PacketV3::decode(bytes.as_ref()));
+}
 
-    let v5_publish = PacketV5::Publish(mqtt_proto::v5::Publish {
+#[bench]
+fn v5_publish_decode(b: &mut Bencher) {
+    let packet = PacketV5::Publish(mqtt_proto::v5::Publish {
         dup: false,
         retain: false,
         qos_pid: QosPid::Level2(Pid::try_from(20).unwrap()),
@@ -111,13 +115,6 @@ fn bench_decode(c: &mut Criterion) {
         payload: "hello world v5".into(),
         properties: Default::default(),
     });
-    let v5_publish_bytes = v5_publish.encode().unwrap();
-    group.bench_function("v5_publish_decode", |b| {
-        b.iter(|| PacketV5::decode(v5_publish_bytes.as_ref()))
-    });
-
-    group.finish();
+    let bytes = packet.encode().unwrap();
+    b.iter(|| PacketV5::decode(bytes.as_ref()));
 }
-
-criterion_group!(benches, bench_encode, bench_decode);
-criterion_main!(benches);
