@@ -10,8 +10,6 @@ keywords = ["mqtt", "codec", "network", "async"]
 categories = ["network-programming", "asynchronous"]
 edition = "2021"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [features]
 default = ["std"]
 std = []
