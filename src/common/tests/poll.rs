@@ -91,23 +91,48 @@ impl PollHeader for MockHeader {
         }
     }
 
-    async fn stream_decode<T: embedded_io_async::Read + Unpin>(
-        self,
-        reader: &mut T,
-    ) -> Result<Self::Packet, Self::Error> {
+    fn decode_buffer(self, buf: &mut PacketBuf) -> Result<Self::Packet, Self::Error> {
         let packet = match self.packet_type & 0xF0 {
             0x10 => {
-                let protocol_name = read_string(reader).await?.to_string();
-                let protocol_version = read_u8(reader).await?;
+                let protocol_name = buf.read_string()?.to_string();
+                let protocol_version = buf.read_u8()?;
                 MockPacket::Connect {
                     protocol_name,
                     protocol_version,
                 }
             }
             0x30 => {
-                let topic = read_string(reader).await?.to_string();
-                let mock_pid = read_u16(reader).await?;
-                let payload = read_bytes(reader).await?;
+                let topic = buf.read_string()?.to_string();
+                let mock_pid = buf.read_u16()?;
+                let payload = buf.read_bytes()?.to_vec();
+                MockPacket::Publish {
+                    topic,
+                    mock_pid,
+                    payload,
+                }
+            }
+            _ => MockPacket::Other,
+        };
+        Ok(packet)
+    }
+
+    async fn decode_stream<T: embedded_io_async::Read + Unpin>(
+        self,
+        reader: &mut T,
+    ) -> Result<Self::Packet, Self::Error> {
+        let packet = match self.packet_type & 0xF0 {
+            0x10 => {
+                let protocol_name = read_string_async(reader).await?.to_string();
+                let protocol_version = read_u8_async(reader).await?;
+                MockPacket::Connect {
+                    protocol_name,
+                    protocol_version,
+                }
+            }
+            0x30 => {
+                let topic = read_string_async(reader).await?.to_string();
+                let mock_pid = read_u16_async(reader).await?;
+                let payload = read_bytes_async(reader).await?;
                 MockPacket::Publish {
                     topic,
                     mock_pid,

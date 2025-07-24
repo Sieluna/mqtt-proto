@@ -1,6 +1,6 @@
 use embedded_io_async::Read;
 
-use crate::{read_u16, Error, GenericPollPacket, GenericPollPacketState, Pid, PollHeader};
+use crate::{read_u16_async, Error, GenericPollPacket, GenericPollPacketState, Pid, PollHeader};
 
 use super::{
     Connack, Connect, Header, Packet, PacketType, Publish, Suback, Subscribe, Unsubscribe,
@@ -27,8 +27,25 @@ impl PollHeader for Header {
         Some(packet)
     }
 
+    fn decode_buffer(self, buf: &mut crate::PacketBuf) -> Result<Self::Packet, Self::Error> {
+        match self.typ {
+            PacketType::Connect => Connect::decode(buf).map(Into::into),
+            PacketType::Connack => Connack::decode(buf).map(Into::into),
+            PacketType::Publish => Publish::decode(buf, self).map(Into::into),
+            PacketType::Puback => Ok(Packet::Puback(Pid::try_from(buf.read_u16()?)?)),
+            PacketType::Pubrec => Ok(Packet::Pubrec(Pid::try_from(buf.read_u16()?)?)),
+            PacketType::Pubrel => Ok(Packet::Pubrel(Pid::try_from(buf.read_u16()?)?)),
+            PacketType::Pubcomp => Ok(Packet::Pubcomp(Pid::try_from(buf.read_u16()?)?)),
+            PacketType::Subscribe => Subscribe::decode(buf, self).map(Into::into),
+            PacketType::Suback => Suback::decode(buf, self).map(Into::into),
+            PacketType::Unsubscribe => Unsubscribe::decode(buf, self).map(Into::into),
+            PacketType::Unsuback => Ok(Packet::Unsuback(Pid::try_from(buf.read_u16()?)?)),
+            PacketType::Pingreq | PacketType::Pingresp | PacketType::Disconnect => unreachable!(),
+        }
+    }
+
     #[rustfmt::skip]
-    async fn stream_decode<T: Read + Unpin>(
+    async fn decode_stream<T: Read + Unpin>(
         self,
         reader: &mut T,
     ) -> Result<Self::Packet, Self::Error> {
@@ -36,14 +53,14 @@ impl PollHeader for Header {
             PacketType::Connect => Connect::decode_async(reader).await.map(Into::into),
             PacketType::Connack => Connack::decode_async(reader).await.map(Into::into),
             PacketType::Publish => Publish::decode_async(reader, self).await.map(Into::into),
-            PacketType::Puback => Ok(Packet::Puback(Pid::try_from(read_u16(reader).await?)?)),
-            PacketType::Pubrec => Ok(Packet::Pubrec(Pid::try_from(read_u16(reader).await?)?)),
-            PacketType::Pubrel => Ok(Packet::Pubrel(Pid::try_from(read_u16(reader).await?)?)),
-            PacketType::Pubcomp => Ok(Packet::Pubcomp(Pid::try_from(read_u16(reader).await?)?)),
-            PacketType::Subscribe => Subscribe::decode_async(reader, self.remaining_len()).await.map(Into::into),
-            PacketType::Suback => Suback::decode_async(reader, self.remaining_len()).await.map(Into::into),
-            PacketType::Unsubscribe => Unsubscribe::decode_async(reader, self.remaining_len()).await.map(Into::into),
-            PacketType::Unsuback => Ok(Packet::Unsuback(Pid::try_from(read_u16(reader).await?)?)),
+            PacketType::Puback => Ok(Packet::Puback(Pid::try_from(read_u16_async(reader).await?)?)),
+            PacketType::Pubrec => Ok(Packet::Pubrec(Pid::try_from(read_u16_async(reader).await?)?)),
+            PacketType::Pubrel => Ok(Packet::Pubrel(Pid::try_from(read_u16_async(reader).await?)?)),
+            PacketType::Pubcomp => Ok(Packet::Pubcomp(Pid::try_from(read_u16_async(reader).await?)?)),
+            PacketType::Subscribe => Subscribe::decode_async(reader, self).await.map(Into::into),
+            PacketType::Suback => Suback::decode_async(reader, self).await.map(Into::into),
+            PacketType::Unsubscribe => Unsubscribe::decode_async(reader, self).await.map(Into::into),
+            PacketType::Unsuback => Ok(Packet::Unsuback(Pid::try_from(read_u16_async(reader).await?)?)),
             PacketType::Pingreq | PacketType::Pingresp | PacketType::Disconnect => unreachable!(),
         }
     }

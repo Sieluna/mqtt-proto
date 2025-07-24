@@ -7,7 +7,7 @@ use alloc::vec::Vec;
 
 use embedded_io_async::Read;
 
-use crate::{AsyncRead, Error, IoErrorKind, ToError};
+use crate::{AsyncRead, Error, IoErrorKind, PacketBuf, ToError};
 
 #[derive(Debug, Clone)]
 pub enum GenericPollPacketState<H> {
@@ -37,8 +37,11 @@ pub trait PollHeader {
     /// Packet without body is empty packet
     fn build_empty_packet(&self) -> Option<Self::Packet>;
 
+    /// Synchronous decode method for direct buffer access
+    fn decode_buffer(self, buf: &mut PacketBuf) -> Result<Self::Packet, Self::Error>;
+
     /// Async decode method for stream-based processing
-    async fn stream_decode<T: Read + Unpin>(
+    async fn decode_stream<T: Read + Unpin>(
         self,
         reader: &mut T,
     ) -> Result<Self::Packet, Self::Error>;
@@ -46,6 +49,10 @@ pub trait PollHeader {
     fn remaining_len(&self) -> usize;
 
     fn is_eof_error(err: &Self::Error) -> bool;
+
+    fn prefer_cache_decode(&self) -> bool {
+        self.remaining_len() < 4096
+    }
 }
 
 impl<H> Default for GenericPollPacketState<H> {
@@ -154,13 +161,26 @@ where
                     }
                 }
 
-                let mut buf_ref: &[u8] = unsafe { mem::transmute(&buf[..]) };
-                let result = header.stream_decode(&mut buf_ref).await;
-                if result.is_ok() && !buf_ref.is_empty() {
-                    return Err(Error::InvalidRemainingLength.into());
-                }
-                if let Err(err) = &result {
-                    if H::is_eof_error(err) {
+                let buf_slice: &[u8] = unsafe { mem::transmute(&buf[..]) };
+
+                let result = if header.prefer_cache_decode() {
+                    let mut packet_buf = PacketBuf::new(buf_slice);
+                    let packet = header.decode_buffer(&mut packet_buf);
+                    if packet.is_ok() && !packet_buf.is_fully_consumed() {
+                        return Err(Error::InvalidRemainingLength.into());
+                    }
+                    packet
+                } else {
+                    let mut buf_ref: &[u8] = buf_slice;
+                    let stream_result = header.decode_stream(&mut buf_ref).await;
+                    if stream_result.is_ok() && !buf_ref.is_empty() {
+                        return Err(Error::InvalidRemainingLength.into());
+                    }
+                    stream_result
+                };
+
+                if let Err(e) = &result {
+                    if H::is_eof_error(&e) {
                         return Err(Error::InvalidRemainingLength.into());
                     }
                 }
