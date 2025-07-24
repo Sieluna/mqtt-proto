@@ -53,3 +53,6 @@ tokio = ["dep:embedded-io-adapters", "dep:tokio", "embedded-io-adapters?/tokio-1
 
 # Enable DHAT Memory debugging
 dhat-heap = ["std"]
+
+[profile.release]
+debug = true

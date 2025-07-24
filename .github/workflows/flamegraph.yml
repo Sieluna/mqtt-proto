@@ -1,0 +1,187 @@
+name: Flamegraph Performance Profiling
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  
+  workflow_dispatch:
+    inputs:
+      profile_duration:
+        description: 'Profiling duration in seconds'
+        required: false
+        default: '20'
+        type: string
+      frequency:
+        description: 'Sampling frequency in Hz'
+        required: false
+        default: '997'
+        type: string
+
+jobs:
+  flamegraph:
+    name: Generate Flamegraph
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt install linux-tools-common linux-tools-generic linux-tools-`uname -r`
+
+      - name: Install nightly toolchain
+        run: |
+          rustup toolchain install nightly
+          rustup default nightly
+
+      - name: Install flamegraph
+        run: cargo install flamegraph
+
+      - name: Build project in release mode
+        run: cargo build --release
+
+      - name: Build examples
+        run: |
+          echo "🔧 Compiling performance analysis examples..."
+          cargo build --example focused_benchmarks --release
+          cargo build --example encoding_benchmark --release
+          cargo build --example decoding_benchmark --release
+          echo "✅ Examples compilation completed"
+
+      - name: Set kernel parameters for perf
+        run: |
+          # Allow perf to be run by non-root users
+          echo 0 | sudo tee /proc/sys/kernel/perf_event_paranoid
+          echo 0 | sudo tee /proc/sys/kernel/kptr_restrict
+
+      - name: Test example execution
+        run: |
+          echo "📊 Testing example execution..."
+          timeout 10s cargo run --example focused_benchmarks --release || echo "✅ Example test completed"
+
+      - name: Generate flamegraphs for specific operations
+        run: |
+          set -e  # Exit on error
+          
+          # Set default values if not provided
+          DURATION="${{ github.event.inputs.profile_duration || '20' }}"
+          FREQUENCY="${{ github.event.inputs.frequency || '997' }}"
+          
+          echo "🔥 Starting targeted flamegraph generation with:"
+          echo "  Duration: ${DURATION}s"
+          echo "  Frequency: ${FREQUENCY}Hz"
+          
+          # Create output directory
+          mkdir -p flamegraphs
+          
+          # Generate flamegraph for encoding operations
+          echo "🔥 Analyzing encoding performance..."
+          timeout ${DURATION}s cargo flamegraph \
+            --freq ${FREQUENCY} \
+            --output flamegraphs/encoding_analysis.svg \
+            --example encoding_benchmark \
+            --no-inline \
+            && echo "✅ Encoding flamegraph generated successfully" \
+            || echo "⚠️  Encoding flamegraph generation failed or timed out"
+          
+          # Generate flamegraph for decoding operations
+          echo "🔥 Analyzing decoding performance..."
+          timeout ${DURATION}s cargo flamegraph \
+            --freq ${FREQUENCY} \
+            --output flamegraphs/decoding_analysis.svg \
+            --example decoding_benchmark \
+            --no-inline \
+            && echo "✅ Decoding flamegraph generated successfully" \
+            || echo "⚠️  Decoding flamegraph generation failed or timed out"
+          
+          # Generate comprehensive flamegraph
+          echo "🔥 Analyzing overall performance..."
+          timeout $((DURATION + 10))s cargo flamegraph \
+            --freq ${FREQUENCY} \
+            --output flamegraphs/comprehensive_analysis.svg \
+            --example focused_benchmarks \
+            --no-inline \
+            && echo "✅ Comprehensive flamegraph generated successfully" \
+            || echo "⚠️  Comprehensive flamegraph generation failed or timed out"
+          
+          # Generate simplified encoding flamegraph with shorter duration
+          echo "🔥 Quick encoding analysis..."
+          timeout 10s cargo flamegraph \
+            --freq ${FREQUENCY} \
+            --output flamegraphs/quick_encoding.svg \
+            --example encoding_benchmark \
+            --no-inline \
+            && echo "✅ Quick encoding flamegraph generated" \
+            || echo "⚠️  Quick encoding flamegraph failed"
+
+      - name: List generated flamegraphs
+        run: |
+          echo "📋 Checking flamegraphs directory:"
+          ls -la flamegraphs/ || echo "❌ No flamegraphs directory found"
+          
+          echo ""
+          echo "📊 Generated files:"
+          find flamegraphs/ -name "*.svg" -exec ls -lh {} \; || echo "❌ No .svg files found"
+          
+          echo ""
+          echo "## Flamegraph Analysis Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [ -d "flamegraphs" ] && [ "$(find flamegraphs/ -name '*.svg' | wc -l)" -gt 0 ]; then
+            echo "✅ Successfully generated targeted flamegraphs:" >> $GITHUB_STEP_SUMMARY
+            for svg in flamegraphs/*.svg; do
+              if [ -f "$svg" ]; then
+                filename=$(basename "$svg")
+                size=$(stat -c%s "$svg" 2>/dev/null || echo "unknown")
+                echo "- **$filename**: ${size} bytes" >> $GITHUB_STEP_SUMMARY
+              fi
+            done
+            
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### Analysis Focus Areas:" >> $GITHUB_STEP_SUMMARY
+            echo "- **encoding_analysis.svg**: MQTT packet encoding performance hotspots" >> $GITHUB_STEP_SUMMARY
+            echo "- **decoding_analysis.svg**: MQTT packet decoding performance bottlenecks" >> $GITHUB_STEP_SUMMARY
+            echo "- **comprehensive_analysis.svg**: Overall codec performance analysis" >> $GITHUB_STEP_SUMMARY
+            echo "- **quick_encoding.svg**: Fast encoding performance snapshot" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "Flamegraph files have been uploaded as artifacts. Download and open them in a web browser to analyze performance hotspots." >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ No flamegraphs were generated successfully." >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**Possible causes:**" >> $GITHUB_STEP_SUMMARY
+            echo "- Example execution timeout" >> $GITHUB_STEP_SUMMARY
+            echo "- Insufficient permissions for perf" >> $GITHUB_STEP_SUMMARY
+            echo "- Example compilation issues" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Upload flamegraph artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: flamegraphs-${{ github.sha }}
+          path: flamegraphs/
+          retention-days: 30
+          if-no-files-found: warn
+
+      - name: Performance analysis summary
+        run: |
+          echo "## 🔥 Performance Bottleneck Analysis Guide" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### How to analyze the flamegraphs:" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "1. **Download** the flamegraph artifacts from this workflow run" >> $GITHUB_STEP_SUMMARY
+          echo "2. **Open** the .svg files in a web browser" >> $GITHUB_STEP_SUMMARY
+          echo "3. **Identify hotspots** - look for wide bars (high CPU usage)" >> $GITHUB_STEP_SUMMARY
+          echo "4. **Click to zoom** - click on functions to drill down into details" >> $GITHUB_STEP_SUMMARY
+          echo "5. **Focus on bottlenecks** - target the widest functions for optimization" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Key areas to examine:" >> $GITHUB_STEP_SUMMARY
+          echo "- Memory allocation patterns" >> $GITHUB_STEP_SUMMARY
+          echo "- String processing overhead" >> $GITHUB_STEP_SUMMARY
+          echo "- Serialization/deserialization costs" >> $GITHUB_STEP_SUMMARY
+          echo "- Protocol-specific encoding differences (v3 vs v5)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Profiling Configuration:**" >> $GITHUB_STEP_SUMMARY
+          echo "- Duration: ${{ github.event.inputs.profile_duration || '20' }} seconds" >> $GITHUB_STEP_SUMMARY
+          echo "- Frequency: ${{ github.event.inputs.frequency || '997' }} Hz" >> $GITHUB_STEP_SUMMARY
