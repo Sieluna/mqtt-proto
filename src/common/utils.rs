@@ -13,10 +13,16 @@ use crate::{AsyncRead, Encodable, Error, SyncWrite, ToError};
 #[inline]
 pub async fn decode_raw_header_async<T: AsyncRead + Unpin>(
     reader: &mut T,
-) -> Result<(u8, u32), Error> {
+) -> Result<(u8, u32, usize), Error> {
     let typ = read_u8_async(reader).await?;
-    let (remaining_len, _bytes) = decode_var_int_async(reader).await?;
-    Ok((typ, remaining_len))
+    let (remaining_len, bytes) = decode_var_int_async(reader).await?;
+    Ok((typ, remaining_len, bytes))
+}
+
+#[inline]
+pub fn read_string<'a>(data: &'a [u8], offset: &mut usize) -> Result<&'a str, Error> {
+    let data_slice = read_bytes(data, offset)?;
+    from_utf8(data_slice).map_err(|_| Error::InvalidString)
 }
 
 #[inline]
@@ -26,6 +32,26 @@ pub(crate) async fn read_string_async<T: AsyncRead + Unpin>(
     let data_buf = read_bytes_async(reader).await?;
     let s = from_utf8(&data_buf).map_err(|_| Error::InvalidString)?;
     Ok(s.into())
+}
+
+#[inline]
+pub fn read_bytes<'a>(data: &'a [u8], offset: &mut usize) -> Result<&'a [u8], Error> {
+    let data_len = read_u16(data, offset)? as usize;
+    read_raw_bytes(data, offset, data_len)
+}
+
+#[inline]
+pub fn read_raw_bytes<'a>(
+    data: &'a [u8],
+    offset: &mut usize,
+    len: usize,
+) -> Result<&'a [u8], Error> {
+    if *offset + len > data.len() {
+        return Err(Error::IoError(crate::IoErrorKind::UnexpectedEof));
+    }
+    let result = &data[*offset..*offset + len];
+    *offset += len;
+    Ok(result)
 }
 
 #[inline]
@@ -43,6 +69,21 @@ pub(crate) async fn read_bytes_async<T: AsyncRead + Unpin>(
 
 // Only for v5.0
 #[inline]
+pub(crate) fn read_u32(data: &[u8], offset: &mut usize) -> Result<u32, Error> {
+    if *offset + 4 > data.len() {
+        return Err(Error::IoError(crate::IoErrorKind::UnexpectedEof));
+    }
+    let value = u32::from_be_bytes([
+        data[*offset],
+        data[*offset + 1],
+        data[*offset + 2],
+        data[*offset + 3],
+    ]);
+    *offset += 4;
+    Ok(value)
+}
+
+#[inline]
 pub(crate) async fn read_u32_async<T: AsyncRead + Unpin>(reader: &mut T) -> Result<u32, Error> {
     let mut len4_bytes = [0u8; 4];
     reader
@@ -50,6 +91,16 @@ pub(crate) async fn read_u32_async<T: AsyncRead + Unpin>(reader: &mut T) -> Resu
         .await
         .map_err(ToError::to_error)?;
     Ok(u32::from_be_bytes(len4_bytes))
+}
+
+#[inline]
+pub(crate) fn read_u16(data: &[u8], offset: &mut usize) -> Result<u16, Error> {
+    if *offset + 2 > data.len() {
+        return Err(Error::IoError(crate::IoErrorKind::UnexpectedEof));
+    }
+    let value = u16::from_be_bytes([data[*offset], data[*offset + 1]]);
+    *offset += 2;
+    Ok(value)
 }
 
 #[inline]
@@ -63,6 +114,16 @@ pub(crate) async fn read_u16_async<T: AsyncRead + Unpin>(reader: &mut T) -> Resu
 }
 
 #[inline]
+pub(crate) fn read_u8(data: &[u8], offset: &mut usize) -> Result<u8, Error> {
+    if *offset >= data.len() {
+        return Err(Error::IoError(crate::IoErrorKind::UnexpectedEof));
+    }
+    let value = data[*offset];
+    *offset += 1;
+    Ok(value)
+}
+
+#[inline]
 pub(crate) async fn read_u8_async<T: AsyncRead + Unpin>(reader: &mut T) -> Result<u8, Error> {
     let mut byte = [0u8; 1];
     reader
@@ -70,134 +131,6 @@ pub(crate) async fn read_u8_async<T: AsyncRead + Unpin>(reader: &mut T) -> Resul
         .await
         .map_err(ToError::to_error)?;
     Ok(byte[0])
-}
-
-#[derive(Debug)]
-pub struct PacketBuf<'a> {
-    data: &'a [u8],
-    offset: usize,
-}
-
-impl<'a> PacketBuf<'a> {
-    #[inline]
-    pub fn new(data: &'a [u8]) -> Self {
-        Self { data, offset: 0 }
-    }
-
-    #[inline]
-    pub fn position(&self) -> usize {
-        self.offset
-    }
-
-    #[inline]
-    pub fn remaining(&self) -> usize {
-        self.data.len().saturating_sub(self.offset)
-    }
-
-    #[inline]
-    pub fn is_consumed(&self) -> bool {
-        self.offset >= self.data.len()
-    }
-
-    #[inline]
-    pub fn is_fully_consumed(&self) -> bool {
-        self.offset == self.data.len()
-    }
-
-    #[inline]
-    pub fn data(&self) -> &[u8] {
-        self.data
-    }
-
-    #[inline]
-    pub fn set_offset(&mut self, offset: usize) {
-        self.offset = offset;
-    }
-
-    #[inline]
-    pub fn read_u8(&mut self) -> Result<u8, Error> {
-        if self.offset >= self.data.len() {
-            return Err(Error::IoError(crate::IoErrorKind::UnexpectedEof));
-        }
-        let value = self.data[self.offset];
-        self.offset += 1;
-        Ok(value)
-    }
-
-    #[inline]
-    pub fn read_u16(&mut self) -> Result<u16, Error> {
-        if self.offset + 2 > self.data.len() {
-            return Err(Error::IoError(crate::IoErrorKind::UnexpectedEof));
-        }
-        let value = u16::from_be_bytes([self.data[self.offset], self.data[self.offset + 1]]);
-        self.offset += 2;
-        Ok(value)
-    }
-
-    #[inline]
-    pub fn read_u32(&mut self) -> Result<u32, Error> {
-        if self.offset + 4 > self.data.len() {
-            return Err(Error::IoError(crate::IoErrorKind::UnexpectedEof));
-        }
-        let value = u32::from_be_bytes([
-            self.data[self.offset],
-            self.data[self.offset + 1],
-            self.data[self.offset + 2],
-            self.data[self.offset + 3],
-        ]);
-        self.offset += 4;
-        Ok(value)
-    }
-
-    #[inline]
-    pub fn read_string(&mut self) -> Result<&'a str, Error> {
-        let data_slice = self.read_bytes()?;
-        from_utf8(data_slice).map_err(|_| Error::InvalidString)
-    }
-
-    #[inline]
-    pub fn read_bytes(&mut self) -> Result<&'a [u8], Error> {
-        let data_len = self.read_u16()? as usize;
-        if self.offset + data_len > self.data.len() {
-            return Err(Error::IoError(crate::IoErrorKind::UnexpectedEof));
-        }
-        let result = &self.data[self.offset..self.offset + data_len];
-        self.offset += data_len;
-        Ok(result)
-    }
-
-    #[inline]
-    pub fn read_raw_bytes(&mut self, len: usize) -> Result<&'a [u8], Error> {
-        if self.offset + len > self.data.len() {
-            return Err(Error::IoError(crate::IoErrorKind::UnexpectedEof));
-        }
-        let result = &self.data[self.offset..self.offset + len];
-        self.offset += len;
-        Ok(result)
-    }
-
-    #[inline]
-    pub fn decode_var_int(&mut self) -> Result<(u32, usize), Error> {
-        let start_offset = self.offset;
-        let mut var_int: u32 = 0;
-        let mut i = 0;
-        loop {
-            if self.offset >= self.data.len() {
-                return Err(Error::IoError(crate::IoErrorKind::UnexpectedEof));
-            }
-            let byte = self.data[self.offset];
-            self.offset += 1;
-            var_int |= (u32::from(byte) & 0x7F) << (7 * i);
-            if byte & 0x80 == 0 {
-                break;
-            } else if i < 3 {
-                i += 1;
-            } else {
-                return Err(Error::InvalidVarByteInt);
-            }
-        }
-        Ok((var_int, self.offset - start_offset))
-    }
 }
 
 #[inline]
@@ -248,6 +181,29 @@ pub(crate) fn write_var_int<W: SyncWrite>(writer: &mut W, mut len: usize) -> Res
 }
 
 /// Decode a variable byte integer (4 bytes max)
+#[inline]
+pub fn decode_var_int(data: &[u8], offset: &mut usize) -> Result<(u32, usize), Error> {
+    let start_offset = *offset;
+    let mut var_int: u32 = 0;
+    let mut i = 0;
+    loop {
+        if *offset >= data.len() {
+            return Err(Error::IoError(crate::IoErrorKind::UnexpectedEof));
+        }
+        let byte = data[*offset];
+        *offset += 1;
+        var_int |= (u32::from(byte) & 0x7F) << (7 * i);
+        if byte & 0x80 == 0 {
+            break;
+        } else if i < 3 {
+            i += 1;
+        } else {
+            return Err(Error::InvalidVarByteInt);
+        }
+    }
+    Ok((var_int, *offset - start_offset))
+}
+
 #[inline]
 pub(crate) async fn decode_var_int_async<T: AsyncRead + Unpin>(
     reader: &mut T,

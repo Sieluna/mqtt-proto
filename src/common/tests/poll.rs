@@ -11,8 +11,9 @@ use crate::*;
 #[cfg(feature = "dhat-heap")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct MockHeader {
-    remaining_len: u32,
     packet_type: u8,
+    remaining_len: u32,
+    total_len: u32,
 }
 
 #[cfg(feature = "dhat-heap")]
@@ -76,10 +77,11 @@ impl PollHeader for MockHeader {
     type Error = Error;
     type Packet = MockPacket;
 
-    fn new_with(hd: u8, remaining_len: u32) -> Result<Self, Self::Error> {
+    fn new_with(hd: u8, remaining_len: u32, total_len: u32) -> Result<Self, Self::Error> {
         Ok(MockHeader {
-            remaining_len,
             packet_type: hd,
+            remaining_len,
+            total_len,
         })
     }
 
@@ -91,20 +93,20 @@ impl PollHeader for MockHeader {
         }
     }
 
-    fn decode_buffer(self, buf: &mut PacketBuf) -> Result<Self::Packet, Self::Error> {
+    fn decode_buffer(self, buf: &[u8], offset: &mut usize) -> Result<Self::Packet, Self::Error> {
         let packet = match self.packet_type & 0xF0 {
             0x10 => {
-                let protocol_name = buf.read_string()?.to_string();
-                let protocol_version = buf.read_u8()?;
+                let protocol_name = read_string(buf, offset)?.to_string();
+                let protocol_version = read_u8(buf, offset)?;
                 MockPacket::Connect {
                     protocol_name,
                     protocol_version,
                 }
             }
             0x30 => {
-                let topic = buf.read_string()?.to_string();
-                let mock_pid = buf.read_u16()?;
-                let payload = buf.read_bytes()?.to_vec();
+                let topic = read_string(buf, offset)?.to_string();
+                let mock_pid = read_u16(buf, offset)?;
+                let payload = read_bytes(buf, offset)?.to_vec();
                 MockPacket::Publish {
                     topic,
                     mock_pid,
@@ -113,6 +115,7 @@ impl PollHeader for MockHeader {
             }
             _ => MockPacket::Other,
         };
+        assert_eq!(*offset, buf.len(), "offset should move to end");
         Ok(packet)
     }
 
@@ -146,6 +149,10 @@ impl PollHeader for MockHeader {
 
     fn remaining_len(&self) -> usize {
         self.remaining_len as usize
+    }
+
+    fn total_len(&self) -> usize {
+        self.total_len as usize
     }
 
     fn is_eof_error(err: &Self::Error) -> bool {

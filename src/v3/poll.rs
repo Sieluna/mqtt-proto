@@ -10,11 +10,11 @@ impl PollHeader for Header {
     type Error = Error;
     type Packet = Packet;
 
-    fn new_with(hd: u8, remaining_len: u32) -> Result<Self, Self::Error>
+    fn new_with(hd: u8, remaining_len: u32, total_len: u32) -> Result<Self, Self::Error>
     where
         Self: Sized,
     {
-        Header::new_with(hd, remaining_len)
+        Header::new_with(hd, remaining_len, total_len)
     }
 
     fn build_empty_packet(&self) -> Option<Self::Packet> {
@@ -27,10 +27,10 @@ impl PollHeader for Header {
         Some(packet)
     }
 
-    fn decode_buffer(self, buf: &mut crate::PacketBuf) -> Result<Self::Packet, Self::Error> {
+    fn decode_buffer(self, buf: &[u8], offset: &mut usize) -> Result<Self::Packet, Self::Error> {
         match self.typ {
-            PacketType::Connect => Connect::decode(buf).map(Into::into),
-            PacketType::Connack => Connack::decode(buf).map(Into::into),
+            PacketType::Connect => Connect::decode(buf, offset).map(Into::into),
+            PacketType::Connack => Connack::decode(buf, offset).map(Into::into),
             PacketType::Publish => Publish::decode(buf, self).map(Into::into),
             PacketType::Puback => Ok(Packet::Puback(Pid::try_from(buf.read_u16()?)?)),
             PacketType::Pubrec => Ok(Packet::Pubrec(Pid::try_from(buf.read_u16()?)?)),

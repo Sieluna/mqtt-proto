@@ -9,11 +9,11 @@ use alloc::vec::Vec;
 use simdutf8::basic::from_utf8;
 
 use crate::{
-    write_bytes, write_u8, AsyncRead, Error, PacketBuf, SyncWrite, LEVEL_SEP, MATCH_ALL_CHAR,
-    MATCH_ONE_CHAR, SHARED_PREFIX, SYS_PREFIX,
+    write_bytes, write_u8, AsyncRead, Error, SyncWrite, LEVEL_SEP, MATCH_ALL_CHAR, MATCH_ONE_CHAR,
+    SHARED_PREFIX, SYS_PREFIX,
 };
 
-use super::{read_bytes_async, read_u8_async};
+use super::{read_bytes, read_bytes_async, read_u8, read_u8_async};
 
 pub const MQISDP: &[u8] = b"MQIsdp";
 pub const MQTT: &[u8] = b"MQTT";
@@ -67,9 +67,9 @@ impl Protocol {
         }
     }
 
-    pub fn decode(buf: &mut PacketBuf) -> Result<Self, Error> {
-        let name_buf = buf.read_bytes()?;
-        let level = buf.read_u8()?;
+    pub fn decode(buf: &[u8], offset: &mut usize) -> Result<Self, Error> {
+        let name_buf = read_bytes(buf, offset)?;
+        let level = read_u8(buf, offset)?;
         Protocol::new(&name_buf, level)
     }
 

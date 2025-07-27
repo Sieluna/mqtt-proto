@@ -9,7 +9,7 @@ use crate::{
 };
 
 use super::{
-    decode_properties, encode_properties, encode_properties_len, ErrorV5, Header, PacketType,
+    decode_properties_async, encode_properties, encode_properties_len, ErrorV5, Header, PacketType,
     PropertyId, PropertyValue, UserProperty, VarByteInt,
 };
 
@@ -113,7 +113,7 @@ impl SubscribeProperties {
         packet_type: PacketType,
     ) -> Result<Self, ErrorV5> {
         let mut properties = SubscribeProperties::default();
-        decode_properties!(packet_type, properties, reader, SubscriptionIdentifier,);
+        decode_properties_async!(packet_type, properties, reader, SubscriptionIdentifier,);
         Ok(properties)
     }
 }
@@ -258,7 +258,7 @@ impl SubackProperties {
         packet_type: PacketType,
     ) -> Result<Self, ErrorV5> {
         let mut properties = SubackProperties::default();
-        decode_properties!(packet_type, properties, reader, ReasonString,);
+        decode_properties_async!(packet_type, properties, reader, ReasonString,);
         Ok(properties)
     }
 }
@@ -362,7 +362,7 @@ impl Unsubscribe {
             let property_id = PropertyId::from_u8(read_u8_async(reader).await?)?;
             match property_id {
                 PropertyId::UserProperty => {
-                    let property = PropertyValue::decode_user_property(reader).await?;
+                    let property = PropertyValue::decode_user_property_async(reader).await?;
                     len += 1 + 4 + property.name.len() + property.value.len();
                     properties.user_properties.push(property);
                 }
@@ -429,7 +429,7 @@ impl UnsubscribeProperties {
         packet_type: PacketType,
     ) -> Result<Self, ErrorV5> {
         let mut properties = UnsubscribeProperties::default();
-        decode_properties!(packet_type, properties, reader,);
+        decode_properties_async!(packet_type, properties, reader,);
         Ok(properties)
     }
 }
@@ -525,7 +525,7 @@ impl UnsubackProperties {
         packet_type: PacketType,
     ) -> Result<Self, ErrorV5> {
         let mut properties = UnsubackProperties::default();
-        decode_properties!(packet_type, properties, reader, ReasonString,);
+        decode_properties_async!(packet_type, properties, reader, ReasonString,);
         Ok(properties)
     }
 }

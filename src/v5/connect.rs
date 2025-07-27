@@ -15,7 +15,7 @@ use crate::{
 };
 
 use super::{
-    decode_properties, encode_properties, encode_properties_len, ErrorV5, Header, PacketType,
+    decode_properties_async, encode_properties, encode_properties_len, ErrorV5, Header, PacketType,
     UserProperty,
 };
 
@@ -253,7 +253,7 @@ impl ConnectProperties {
         packet_type: PacketType,
     ) -> Result<Self, ErrorV5> {
         let mut properties = ConnectProperties::default();
-        decode_properties!(
+        decode_properties_async!(
             packet_type,
             properties,
             reader,
@@ -407,7 +407,7 @@ impl<'a> arbitrary::Arbitrary<'a> for WillProperties {
 impl WillProperties {
     pub async fn decode_async<T: AsyncRead + Unpin>(reader: &mut T) -> Result<Self, ErrorV5> {
         let mut properties = WillProperties::default();
-        decode_properties!(
+        decode_properties_async!(
             LastWill,
             properties,
             reader,
@@ -646,7 +646,7 @@ impl ConnackProperties {
         packet_type: PacketType,
     ) -> Result<Self, ErrorV5> {
         let mut properties = ConnackProperties::default();
-        decode_properties!(
+        decode_properties_async!(
             packet_type,
             properties,
             reader,
@@ -918,7 +918,7 @@ impl DisconnectProperties {
         packet_type: PacketType,
     ) -> Result<Self, ErrorV5> {
         let mut properties = DisconnectProperties::default();
-        decode_properties!(
+        decode_properties_async!(
             packet_type,
             properties,
             reader,
@@ -1075,7 +1075,7 @@ impl AuthProperties {
         packet_type: PacketType,
     ) -> Result<Self, ErrorV5> {
         let mut properties = AuthProperties::default();
-        decode_properties!(
+        decode_properties_async!(
             packet_type,
             properties,
             reader,

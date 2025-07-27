@@ -124,7 +124,25 @@ pub(crate) struct PropertyValue;
 
 impl PropertyValue {
     #[inline]
-    pub(crate) async fn decode_bool<T: AsyncRead + Unpin>(
+    pub(crate) fn decode_bool(
+        buf: &mut crate::PacketBuf,
+        property_id: PropertyId,
+        target: &mut Option<bool>,
+    ) -> Result<(), ErrorV5> {
+        if target.is_some() {
+            return Err(ErrorV5::DuplicatedProperty(property_id));
+        }
+        let value = buf.read_u8()?;
+        if value > 1 {
+            return Err(ErrorV5::InvalidByteProperty(property_id, value));
+        } else {
+            *target = Some(value == 1);
+        }
+        Ok(())
+    }
+
+    #[inline]
+    pub(crate) async fn decode_bool_async<T: AsyncRead + Unpin>(
         reader: &mut T,
         property_id: PropertyId,
         target: &mut Option<bool>,
@@ -142,7 +160,20 @@ impl PropertyValue {
     }
 
     #[inline]
-    pub(crate) async fn decode_u16<T: AsyncRead + Unpin>(
+    pub(crate) fn decode_u16(
+        buf: &mut crate::PacketBuf,
+        property_id: PropertyId,
+        target: &mut Option<u16>,
+    ) -> Result<(), ErrorV5> {
+        if target.is_some() {
+            return Err(ErrorV5::DuplicatedProperty(property_id));
+        }
+        *target = Some(buf.read_u16()?);
+        Ok(())
+    }
+
+    #[inline]
+    pub(crate) async fn decode_u16_async<T: AsyncRead + Unpin>(
         reader: &mut T,
         property_id: PropertyId,
         target: &mut Option<u16>,
@@ -155,7 +186,20 @@ impl PropertyValue {
     }
 
     #[inline]
-    pub(crate) async fn decode_u32<T: AsyncRead + Unpin>(
+    pub(crate) fn decode_u32(
+        buf: &mut crate::PacketBuf,
+        property_id: PropertyId,
+        target: &mut Option<u32>,
+    ) -> Result<(), ErrorV5> {
+        if target.is_some() {
+            return Err(ErrorV5::DuplicatedProperty(property_id));
+        }
+        *target = Some(buf.read_u32()?);
+        Ok(())
+    }
+
+    #[inline]
+    pub(crate) async fn decode_u32_async<T: AsyncRead + Unpin>(
         reader: &mut T,
         property_id: PropertyId,
         target: &mut Option<u32>,
@@ -168,7 +212,20 @@ impl PropertyValue {
     }
 
     #[inline]
-    pub(crate) async fn decode_string<T: AsyncRead + Unpin>(
+    pub(crate) fn decode_string(
+        buf: &mut crate::PacketBuf,
+        property_id: PropertyId,
+        target: &mut Option<Arc<str>>,
+    ) -> Result<(), ErrorV5> {
+        if target.is_some() {
+            return Err(ErrorV5::DuplicatedProperty(property_id));
+        }
+        *target = Some(buf.read_string()?.into());
+        Ok(())
+    }
+
+    #[inline]
+    pub(crate) async fn decode_string_async<T: AsyncRead + Unpin>(
         reader: &mut T,
         property_id: PropertyId,
         target: &mut Option<Arc<str>>,
@@ -181,7 +238,21 @@ impl PropertyValue {
     }
 
     #[inline]
-    pub(crate) async fn decode_topic_name<T: AsyncRead + Unpin>(
+    pub(crate) fn decode_topic_name(
+        buf: &mut crate::PacketBuf,
+        property_id: PropertyId,
+        target: &mut Option<TopicName>,
+    ) -> Result<(), ErrorV5> {
+        if target.is_some() {
+            return Err(ErrorV5::DuplicatedProperty(property_id));
+        }
+        let content = buf.read_string()?;
+        *target = Some(TopicName::try_from(content)?);
+        Ok(())
+    }
+
+    #[inline]
+    pub(crate) async fn decode_topic_name_async<T: AsyncRead + Unpin>(
         reader: &mut T,
         property_id: PropertyId,
         target: &mut Option<TopicName>,
@@ -195,7 +266,20 @@ impl PropertyValue {
     }
 
     #[inline]
-    pub(crate) async fn decode_bytes<T: AsyncRead + Unpin>(
+    pub(crate) fn decode_bytes(
+        buf: &mut crate::PacketBuf,
+        property_id: PropertyId,
+        target: &mut Option<Bytes>,
+    ) -> Result<(), ErrorV5> {
+        if target.is_some() {
+            return Err(ErrorV5::DuplicatedProperty(property_id));
+        }
+        *target = Some(Bytes::copy_from_slice(buf.read_bytes()?));
+        Ok(())
+    }
+
+    #[inline]
+    pub(crate) async fn decode_bytes_async<T: AsyncRead + Unpin>(
         reader: &mut T,
         property_id: PropertyId,
         target: &mut Option<Bytes>,
@@ -207,8 +291,16 @@ impl PropertyValue {
         Ok(())
     }
 
+    pub(crate) fn decode_user_property(
+        buf: &mut crate::PacketBuf,
+    ) -> Result<UserProperty, ErrorV5> {
+        let name = buf.read_string()?.into();
+        let value = buf.read_string()?.into();
+        Ok(UserProperty { name, value })
+    }
+
     #[inline]
-    pub(crate) async fn decode_user_property<T: AsyncRead + Unpin>(
+    pub(crate) async fn decode_user_property_async<T: AsyncRead + Unpin>(
         reader: &mut T,
     ) -> Result<UserProperty, ErrorV5> {
         let name = read_string_async(reader).await?;
@@ -256,9 +348,9 @@ impl TryFrom<u32> for VarByteInt {
     }
 }
 
-macro_rules! decode_property {
+macro_rules! decode_property_async {
     (PayloadFormatIndicator, $properties:expr, $reader:expr, $property_id:expr) => {
-        crate::v5::PropertyValue::decode_bool(
+        crate::v5::PropertyValue::decode_bool_async(
             $reader,
             $property_id,
             &mut $properties.payload_is_utf8,
@@ -266,7 +358,7 @@ macro_rules! decode_property {
         .await?;
     };
     (MessageExpiryInterval, $properties:expr, $reader:expr, $property_id:expr) => {
-        crate::v5::PropertyValue::decode_u32(
+        crate::v5::PropertyValue::decode_u32_async(
             $reader,
             $property_id,
             &mut $properties.message_expiry_interval,
@@ -274,7 +366,7 @@ macro_rules! decode_property {
         .await?;
     };
     (ContentType, $properties:expr, $reader:expr, $property_id:expr) => {
-        crate::v5::PropertyValue::decode_string(
+        crate::v5::PropertyValue::decode_string_async(
             $reader,
             $property_id,
             &mut $properties.content_type,
@@ -282,7 +374,7 @@ macro_rules! decode_property {
         .await?;
     };
     (ResponseTopic, $properties:expr, $reader:expr, $property_id:expr) => {
-        crate::v5::PropertyValue::decode_topic_name(
+        crate::v5::PropertyValue::decode_topic_name_async(
             $reader,
             $property_id,
             &mut $properties.response_topic,
@@ -296,7 +388,7 @@ macro_rules! decode_property {
         })?;
     };
     (CorrelationData, $properties:expr, $reader:expr, $property_id:expr) => {
-        crate::v5::PropertyValue::decode_bytes(
+        crate::v5::PropertyValue::decode_bytes_async(
             $reader,
             $property_id,
             &mut $properties.correlation_data,
@@ -311,7 +403,7 @@ macro_rules! decode_property {
         $properties.subscription_id = Some(crate::v5::VarByteInt::try_from(value)?);
     };
     (SessionExpiryInterval, $properties:expr, $reader:expr, $property_id:expr) => {
-        crate::v5::PropertyValue::decode_u32(
+        crate::v5::PropertyValue::decode_u32_async(
             $reader,
             $property_id,
             &mut $properties.session_expiry_interval,
@@ -319,7 +411,7 @@ macro_rules! decode_property {
         .await?;
     };
     (AssignedClientIdentifier, $properties:expr, $reader:expr, $property_id:expr) => {
-        crate::v5::PropertyValue::decode_string(
+        crate::v5::PropertyValue::decode_string_async(
             $reader,
             $property_id,
             &mut $properties.assigned_client_id,
@@ -327,7 +419,7 @@ macro_rules! decode_property {
         .await?;
     };
     (ServerKeepAlive, $properties:expr, $reader:expr, $property_id:expr) => {
-        crate::v5::PropertyValue::decode_u16(
+        crate::v5::PropertyValue::decode_u16_async(
             $reader,
             $property_id,
             &mut $properties.server_keep_alive,
@@ -335,7 +427,7 @@ macro_rules! decode_property {
         .await?;
     };
     (AuthenticationMethod, $properties:expr, $reader:expr, $property_id:expr) => {
-        crate::v5::PropertyValue::decode_string(
+        crate::v5::PropertyValue::decode_string_async(
             $reader,
             $property_id,
             &mut $properties.auth_method,
@@ -343,11 +435,15 @@ macro_rules! decode_property {
         .await?;
     };
     (AuthenticationData, $properties:expr, $reader:expr, $property_id:expr) => {
-        crate::v5::PropertyValue::decode_bytes($reader, $property_id, &mut $properties.auth_data)
-            .await?;
+        crate::v5::PropertyValue::decode_bytes_async(
+            $reader,
+            $property_id,
+            &mut $properties.auth_data,
+        )
+        .await?;
     };
     (RequestProblemInformation, $properties:expr, $reader:expr, $property_id:expr) => {
-        crate::v5::PropertyValue::decode_bool(
+        crate::v5::PropertyValue::decode_bool_async(
             $reader,
             $property_id,
             &mut $properties.request_problem_info,
@@ -355,7 +451,7 @@ macro_rules! decode_property {
         .await?;
     };
     (WillDelayInterval, $properties:expr, $reader:expr, $property_id:expr) => {
-        crate::v5::PropertyValue::decode_u32(
+        crate::v5::PropertyValue::decode_u32_async(
             $reader,
             $property_id,
             &mut $properties.delay_interval,
@@ -363,7 +459,7 @@ macro_rules! decode_property {
         .await?;
     };
     (RequestResponseInformation, $properties:expr, $reader:expr, $property_id:expr) => {
-        crate::v5::PropertyValue::decode_bool(
+        crate::v5::PropertyValue::decode_bool_async(
             $reader,
             $property_id,
             &mut $properties.request_response_info,
@@ -371,7 +467,7 @@ macro_rules! decode_property {
         .await?;
     };
     (ResponseInformation, $properties:expr, $reader:expr, $property_id:expr) => {
-        crate::v5::PropertyValue::decode_string(
+        crate::v5::PropertyValue::decode_string_async(
             $reader,
             $property_id,
             &mut $properties.response_info,
@@ -379,7 +475,7 @@ macro_rules! decode_property {
         .await?;
     };
     (ServerReference, $properties:expr, $reader:expr, $property_id:expr) => {
-        crate::v5::PropertyValue::decode_string(
+        crate::v5::PropertyValue::decode_string_async(
             $reader,
             $property_id,
             &mut $properties.server_reference,
@@ -387,7 +483,7 @@ macro_rules! decode_property {
         .await?;
     };
     (ReasonString, $properties:expr, $reader:expr, $property_id:expr) => {
-        crate::v5::PropertyValue::decode_string(
+        crate::v5::PropertyValue::decode_string_async(
             $reader,
             $property_id,
             &mut $properties.reason_string,
@@ -395,11 +491,15 @@ macro_rules! decode_property {
         .await?;
     };
     (ReceiveMaximum, $properties:expr, $reader:expr, $property_id:expr) => {
-        crate::v5::PropertyValue::decode_u16($reader, $property_id, &mut $properties.receive_max)
-            .await?;
+        crate::v5::PropertyValue::decode_u16_async(
+            $reader,
+            $property_id,
+            &mut $properties.receive_max,
+        )
+        .await?;
     };
     (TopicAliasMaximum, $properties:expr, $reader:expr, $property_id:expr) => {
-        crate::v5::PropertyValue::decode_u16(
+        crate::v5::PropertyValue::decode_u16_async(
             $reader,
             $property_id,
             &mut $properties.topic_alias_max,
@@ -407,8 +507,12 @@ macro_rules! decode_property {
         .await?;
     };
     (TopicAlias, $properties:expr, $reader:expr, $property_id:expr) => {
-        crate::v5::PropertyValue::decode_u16($reader, $property_id, &mut $properties.topic_alias)
-            .await?;
+        crate::v5::PropertyValue::decode_u16_async(
+            $reader,
+            $property_id,
+            &mut $properties.topic_alias,
+        )
+        .await?;
     };
     (MaximumQoS, $properties:expr, $reader:expr, $property_id:expr) => {
         if $properties.max_qos.is_some() {
@@ -422,7 +526,7 @@ macro_rules! decode_property {
         }
     };
     (RetainAvailable, $properties:expr, $reader:expr, $property_id:expr) => {
-        crate::v5::PropertyValue::decode_bool(
+        crate::v5::PropertyValue::decode_bool_async(
             $reader,
             $property_id,
             &mut $properties.retain_available,
@@ -430,11 +534,11 @@ macro_rules! decode_property {
         .await?;
     };
     (UserProperty, $properties:expr, $reader:expr, $property_id:expr) => {
-        let user_property = crate::v5::PropertyValue::decode_user_property($reader).await?;
+        let user_property = crate::v5::PropertyValue::decode_user_property_async($reader).await?;
         $properties.user_properties.push(user_property);
     };
     (MaximumPacketSize, $properties:expr, $reader:expr, $property_id:expr) => {
-        crate::v5::PropertyValue::decode_u32(
+        crate::v5::PropertyValue::decode_u32_async(
             $reader,
             $property_id,
             &mut $properties.max_packet_size,
@@ -442,7 +546,7 @@ macro_rules! decode_property {
         .await?;
     };
     (WildcardSubscriptionAvailable, $properties:expr, $reader:expr, $property_id:expr) => {
-        crate::v5::PropertyValue::decode_bool(
+        crate::v5::PropertyValue::decode_bool_async(
             $reader,
             $property_id,
             &mut $properties.wildcard_subscription_available,
@@ -450,7 +554,7 @@ macro_rules! decode_property {
         .await?;
     };
     (SubscriptionIdentifierAvailable, $properties:expr, $reader:expr, $property_id:expr) => {
-        crate::v5::PropertyValue::decode_bool(
+        crate::v5::PropertyValue::decode_bool_async(
             $reader,
             $property_id,
             &mut $properties.subscription_id_available,
@@ -458,7 +562,7 @@ macro_rules! decode_property {
         .await?;
     };
     (SharedSubscriptionAvailable, $properties:expr, $reader:expr, $property_id:expr) => {
-        crate::v5::PropertyValue::decode_bool(
+        crate::v5::PropertyValue::decode_bool_async(
             $reader,
             $property_id,
             &mut $properties.shared_subscription_available,
@@ -467,7 +571,7 @@ macro_rules! decode_property {
     };
 }
 
-macro_rules! decode_properties {
+macro_rules! decode_properties_async {
     (LastWill, $properties:expr, $reader:expr, $($t:ident,)*) => {
         let (property_len, _bytes) = crate::decode_var_int_async($reader).await?;
         let mut len = 0;
@@ -476,12 +580,12 @@ macro_rules! decode_properties {
             match property_id {
                 $(
                     crate::v5::PropertyId::$t => {
-                        crate::v5::decode_property!($t, $properties, $reader, property_id);
+                        crate::v5::decode_property_async!($t, $properties, $reader, property_id);
                         crate::v5::encode_property_len!($t, $properties, len);
                     }
                 )*
                     crate::v5::PropertyId::UserProperty => {
-                        crate::v5::decode_property!(UserProperty, $properties, $reader, property_id);
+                        crate::v5::decode_property_async!(UserProperty, $properties, $reader, property_id);
                         let last = $properties.user_properties.last().expect("user property exists");
                         len += 1 + 4 + last.name.len() + last.value.len();
                     }
@@ -500,12 +604,12 @@ macro_rules! decode_properties {
             match property_id {
                 $(
                     crate::v5::PropertyId::$t => {
-                        crate::v5::decode_property!($t, $properties, $reader, property_id);
+                        crate::v5::decode_property_async!($t, $properties, $reader, property_id);
                         crate::v5::encode_property_len!($t, $properties, len);
                     }
                 )*
                     crate::v5::PropertyId::UserProperty => {
-                        crate::v5::decode_property!(UserProperty, $properties, $reader, property_id);
+                        crate::v5::decode_property_async!(UserProperty, $properties, $reader, property_id);
                         let last = $properties.user_properties.last().expect("user property exists");
                         len += 1 + 4 + last.name.len() + last.value.len();
                     }
@@ -518,8 +622,8 @@ macro_rules! decode_properties {
     };
 }
 
-pub(crate) use decode_properties;
-pub(crate) use decode_property;
+pub(crate) use decode_properties_async;
+pub(crate) use decode_property_async;
 
 macro_rules! encode_property {
     (PayloadFormatIndicator, $properties:expr, $writer: expr) => {

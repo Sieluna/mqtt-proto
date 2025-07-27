@@ -31,9 +31,9 @@ pub(crate) mod io {
 pub(crate) use future::block_on;
 pub(crate) use io::{AsyncRead, AsyncWrite, SyncRead, SyncWrite};
 pub(crate) use utils::{
-    decode_var_int_async, encode_packet, packet_from, read_bytes_async, read_string_async,
-    read_u16_async, read_u32_async, read_u8_async, write_bytes, write_string, write_u16, write_u32,
-    write_u8, write_var_int, PacketBuf,
+    decode_var_int, decode_var_int_async, encode_packet, packet_from, read_bytes, read_bytes_async,
+    read_string, read_string_async, read_u16, read_u16_async, read_u32, read_u32_async, read_u8,
+    read_u8_async, write_bytes, write_string, write_u16, write_u32, write_u8, write_var_int,
 };
 
 pub use error::{Error, IoErrorKind, ToError};

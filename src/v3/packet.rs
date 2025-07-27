@@ -5,7 +5,7 @@ use tokio::io::AsyncWriteExt;
 
 use crate::{
     block_on, decode_raw_header_async, encode_packet, packet_from, read_u16_async, total_len,
-    AsyncRead, AsyncWrite, Encodable, Error, Pid, QoS, QosPid, VarBytes,
+    var_int_len, AsyncRead, AsyncWrite, Encodable, Error, Pid, QoS, QosPid, VarBytes,
 };
 
 use super::{Connack, Connect, Publish, Suback, Subscribe, Unsubscribe};
@@ -233,25 +233,36 @@ pub enum PacketType {
 /// Fixed header type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Header {
-    pub typ: PacketType,
-    pub dup: bool,
-    pub qos: QoS,
-    pub retain: bool,
-    pub remaining_len: u32,
+    pub typ: PacketType,    // 1 B
+    pub dup: bool,          // 1 B
+    pub qos: QoS,           // 1 B
+    pub retain: bool,       // 1 B
+    pub remaining_len: u32, // 4 B
+    pub total_len: u32,     // 4 B
+    _padding: [u8; 4],      // 4 B
 }
 
 impl Header {
-    pub fn new(typ: PacketType, dup: bool, qos: QoS, retain: bool, remaining_len: u32) -> Self {
+    pub fn new(
+        typ: PacketType,
+        dup: bool,
+        qos: QoS,
+        retain: bool,
+        remaining_len: u32,
+        total_len: u32,
+    ) -> Self {
         Self {
             typ,
             dup,
             qos,
             retain,
             remaining_len,
+            total_len,
+            _padding: [0; 4],
         }
     }
 
-    pub fn new_with(hd: u8, remaining_len: u32) -> Result<Header, Error> {
+    pub fn new_with(hd: u8, remaining_len: u32, total_len: u32) -> Result<Header, Error> {
         const FLAGS_MASK: u8 = 0b1111;
         let (typ, flags_ok) = match hd >> 4 {
             1 => (PacketType::Connect, hd & FLAGS_MASK == 0),
@@ -263,6 +274,8 @@ impl Header {
                     qos: QoS::from_u8((hd & 0b110) >> 1)?,
                     retain: hd & 1 == 1,
                     remaining_len,
+                    total_len,
+                    _padding: [0; 4],
                 });
             }
             4 => (PacketType::Puback, hd & FLAGS_MASK == 0),
@@ -287,6 +300,8 @@ impl Header {
             qos: QoS::Level0,
             retain: false,
             remaining_len,
+            total_len,
+            _padding: [0; 4],
         })
     }
 
@@ -295,8 +310,8 @@ impl Header {
     }
 
     pub async fn decode_async<T: AsyncRead + Unpin>(reader: &mut T) -> Result<Self, Error> {
-        let (typ, remaining_len) = decode_raw_header_async(reader).await?;
-        Header::new_with(typ, remaining_len)
+        let (typ, remaining_len, total_len) = decode_raw_header_async(reader).await?;
+        Header::new_with(typ, remaining_len, total_len)
     }
 }
 

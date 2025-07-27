@@ -5,10 +5,12 @@ use bytes::Bytes;
 use tokio::io::AsyncReadExt;
 
 use crate::{
-    read_bytes_async, read_string_async, read_u16_async, read_u8_async, write_bytes, write_string,
-    write_u16, write_u8, AsyncRead, ClientId, Encodable, Error, PacketBuf, Protocol, QoS,
-    SyncWrite, ToError, TopicName, Username,
+    read_bytes, read_bytes_async, read_string, read_string_async, read_u16, read_u16_async,
+    read_u8, read_u8_async, write_bytes, write_string, write_u16, write_u8, AsyncRead, ClientId,
+    Encodable, Error, Protocol, QoS, SyncWrite, ToError, TopicName, Username,
 };
+
+use super::Header;
 
 /// Connect packet body type.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -50,9 +52,9 @@ impl Connect {
         }
     }
 
-    pub fn decode(buf: &mut PacketBuf) -> Result<Self, Error> {
-        let protocol = Protocol::decode(buf)?;
-        Self::decode_buffer_with_protocol(buf, protocol)
+    pub fn decode(buf: &[u8], offset: &mut usize) -> Result<Self, Error> {
+        let protocol = Protocol::decode(buf, offset)?;
+        Self::decode_buffer_with_protocol(buf, offset, protocol)
     }
 
     pub async fn decode_async<T: AsyncRead + Unpin>(reader: &mut T) -> Result<Self, Error> {
@@ -61,21 +63,22 @@ impl Connect {
     }
 
     pub fn decode_buffer_with_protocol(
-        buf: &mut PacketBuf,
+        buf: &[u8],
+        offset: &mut usize,
         protocol: Protocol,
     ) -> Result<Self, Error> {
         if protocol as u8 > 4 {
             return Err(Error::UnexpectedProtocol(protocol));
         }
-        let connect_flags: u8 = buf.read_u8()?;
+        let connect_flags: u8 = read_u8(buf, offset)?;
         if connect_flags & 1 != 0 {
             return Err(Error::InvalidConnectFlags(connect_flags));
         }
-        let keep_alive = buf.read_u16()?;
-        let client_id = buf.read_string()?.into();
+        let keep_alive = read_u16(buf, offset)?;
+        let client_id = read_string(buf, offset)?.into();
         let last_will = if connect_flags & 0b100 != 0 {
-            let topic_name_slice = buf.read_string()?;
-            let message_slice = buf.read_bytes()?;
+            let topic_name_slice = read_string(buf, offset)?;
+            let message_slice = read_bytes(buf, offset)?;
             let qos = QoS::from_u8((connect_flags & 0b11000) >> 3)?;
             let retain = (connect_flags & 0b00100000) != 0;
             Some(LastWill {
@@ -90,12 +93,12 @@ impl Connect {
             None
         };
         let username = if connect_flags & 0b10000000 != 0 {
-            Some(buf.read_string()?.into())
+            Some(read_string(buf, offset)?.into())
         } else {
             None
         };
         let password = if connect_flags & 0b01000000 != 0 {
-            Some(Bytes::copy_from_slice(buf.read_bytes()?))
+            Some(Bytes::copy_from_slice(read_bytes(buf, offset)?))
         } else {
             None
         };
@@ -235,13 +238,13 @@ impl Connack {
         }
     }
 
-    pub fn decode(buf: &mut crate::PacketBuf) -> Result<Self, Error> {
-        let session_present = match buf.read_u8()? {
+    pub fn decode(buf: &[u8], offset: &mut usize) -> Result<Self, Error> {
+        let session_present = match read_u8(buf, offset)? {
             0 => false,
             1 => true,
             flag => return Err(Error::InvalidConnackFlags(flag)),
         };
-        let code = ConnectReturnCode::from_u8(buf.read_u8()?)?;
+        let code = ConnectReturnCode::from_u8(read_u8(buf, offset)?)?;
         Ok(Connack {
             session_present,
             code,

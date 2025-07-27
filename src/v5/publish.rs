@@ -14,7 +14,7 @@ use crate::{
 };
 
 use super::{
-    decode_properties, encode_properties, encode_properties_len, ErrorV5, Header, PacketType,
+    decode_properties_async, encode_properties, encode_properties_len, ErrorV5, Header, PacketType,
     UserProperty, VarByteInt,
 };
 
@@ -171,7 +171,7 @@ impl PublishProperties {
         packet_type: PacketType,
     ) -> Result<Self, ErrorV5> {
         let mut properties = PublishProperties::default();
-        decode_properties!(
+        decode_properties_async!(
             packet_type,
             properties,
             reader,
@@ -309,7 +309,7 @@ impl PubackProperties {
         packet_type: PacketType,
     ) -> Result<Self, ErrorV5> {
         let mut properties = PubackProperties::default();
-        decode_properties!(packet_type, properties, reader, ReasonString,);
+        decode_properties_async!(packet_type, properties, reader, ReasonString,);
         Ok(properties)
     }
 }
@@ -465,7 +465,7 @@ impl PubrecProperties {
         packet_type: PacketType,
     ) -> Result<Self, ErrorV5> {
         let mut properties = PubrecProperties::default();
-        decode_properties!(packet_type, properties, reader, ReasonString,);
+        decode_properties_async!(packet_type, properties, reader, ReasonString,);
         Ok(properties)
     }
 }
@@ -621,7 +621,7 @@ impl PubrelProperties {
         packet_type: PacketType,
     ) -> Result<Self, ErrorV5> {
         let mut properties = PubrelProperties::default();
-        decode_properties!(packet_type, properties, reader, ReasonString,);
+        decode_properties_async!(packet_type, properties, reader, ReasonString,);
         Ok(properties)
     }
 }
@@ -754,7 +754,7 @@ impl PubcompProperties {
         packet_type: PacketType,
     ) -> Result<Self, ErrorV5> {
         let mut properties = PubcompProperties::default();
-        decode_properties!(packet_type, properties, reader, ReasonString,);
+        decode_properties_async!(packet_type, properties, reader, ReasonString,);
         Ok(properties)
     }
 }
