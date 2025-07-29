@@ -510,3 +510,114 @@ fn test_decode_unsub_ack() {
             .2
     );
 }
+
+#[tokio::test(flavor = "current_thread")]
+#[cfg(feature = "dhat-heap")]
+async fn poll_actor_model_simulation_v3() {
+    let _profiler = dhat::Profiler::builder().testing().build();
+
+    const NUM_TASKS: usize = 100_000;
+
+    let mut packets = Vec::new();
+
+    for len in [1, 8, 32, 128, 512] {
+        let client_id = "a".repeat(len);
+        let pkt = Packet::Connect(Connect {
+            protocol: Protocol::V311,
+            keep_alive: 60,
+            client_id: client_id.into(),
+            clean_session: true,
+            last_will: None,
+            username: None,
+            password: None,
+        });
+        packets.push(pkt.encode().unwrap());
+    }
+
+    for size in [0, 2, 16, 128, 1024, 4096] {
+        let payload = vec![b'x'; size];
+        let pkt = Packet::Publish(Publish {
+            dup: false,
+            qos_pid: QosPid::Level1(Pid::try_from(1).unwrap()),
+            retain: false,
+            topic_name: TopicName::try_from("topic/test".to_owned()).unwrap(),
+            payload: Bytes::from(payload),
+        });
+        packets.push(pkt.encode().unwrap());
+    }
+
+    for qos in [QoS::Level0, QoS::Level1, QoS::Level2] {
+        let pkt = Packet::Subscribe(Subscribe::new(
+            Pid::try_from(10).unwrap(),
+            vec![(TopicFilter::try_from("a/+".to_owned()).unwrap(), qos)],
+        ));
+        packets.push(pkt.encode().unwrap());
+    }
+    for _ in 0..3 {
+        let pkt = Packet::Unsubscribe(Unsubscribe::new(
+            Pid::try_from(20).unwrap(),
+            vec![TopicFilter::try_from("b/#".to_owned()).unwrap()],
+        ));
+        packets.push(pkt.encode().unwrap());
+    }
+    packets.push(Packet::Pingreq.encode().unwrap());
+    packets.push(Packet::Pingresp.encode().unwrap());
+    packets.push(Packet::Disconnect.encode().unwrap());
+
+    let data: std::sync::Arc<Vec<VarBytes>> = std::sync::Arc::new(packets);
+
+    println!("\n--- `v3::decoder` Actor Model Simulation ({NUM_TASKS} jobs) ---");
+
+    let stats_start = dhat::HeapStats::get();
+    println!(
+        "Start:               {:>5} bytes in {:>2} blocks",
+        stats_start.curr_bytes, stats_start.curr_blocks
+    );
+
+    let simulation_start = std::time::Instant::now();
+    let mut handles = Vec::with_capacity(NUM_TASKS);
+
+    for i in 0..NUM_TASKS {
+        let packets = data.clone();
+        let idx = i % packets.len();
+        let data = packets[idx].clone();
+
+        handles.push(tokio::spawn(async move {
+            let mut buf: &[u8] = data.as_ref();
+            let _ = Packet::decode_async(&mut buf).await;
+        }));
+    }
+
+    for handle in handles {
+        handle.await.unwrap();
+    }
+
+    let elapsed = simulation_start.elapsed();
+    let total_data_size = data.len() * NUM_TASKS;
+    drop(data);
+
+    let stats_end = dhat::HeapStats::get();
+    println!(
+        "End:                 {:>5} bytes in {:>2} blocks. Change: {:>+5} bytes, {:>+3} blocks",
+        stats_end.curr_bytes,
+        stats_end.curr_blocks,
+        stats_end.curr_bytes as i64 - stats_start.curr_bytes as i64,
+        stats_end.curr_blocks as i64 - stats_start.curr_blocks as i64
+    );
+    println!(
+        "Peak memory usage:   {:>5} bytes in {:>2} blocks",
+        stats_end.max_bytes, stats_end.max_blocks
+    );
+
+    let summary = common::MemorySummary::new(
+        "v3::decoder",
+        &stats_start,
+        &stats_end,
+        total_data_size,
+        NUM_TASKS,
+        elapsed,
+    );
+    println!("{}", serde_json::to_string(&summary).unwrap());
+
+    println!("--- End Report ---");
+}
